@@ -1,5 +1,7 @@
 # ach-payment-pilot-demo
 
+[![test](https://github.com/getupworkdev/ach-payment-pilot-demo/actions/workflows/test.yml/badge.svg)](https://github.com/getupworkdev/ach-payment-pilot-demo/actions/workflows/test.yml)
+
 A small, self-contained demo of the parts of an ACH payments pilot that are easy to get wrong:
 
 - a payment **state machine enforced by Postgres**, not by application code
