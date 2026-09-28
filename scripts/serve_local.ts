@@ -1,4 +1,4 @@
-// Serve all three functions on one port without the Supabase CLI or Docker,
+// Serve all the functions on one port without the Supabase CLI or Docker,
 // using the same handlers and env wiring as the real entrypoints. Useful when
 // you have a Postgres to point at but no Docker.
 //
@@ -6,9 +6,10 @@
 //
 // Routes mirror the Supabase gateway: /functions/v1/<name>
 
-import { envDeps, required } from "../supabase/functions/_shared/env.ts";
+import { envDeps, envOutboxWorker, required } from "../supabase/functions/_shared/env.ts";
 import { json } from "../supabase/functions/_shared/http.ts";
 import { createReconcileHandler } from "../supabase/functions/_shared/reconcile.ts";
+import { createOutboxWorkerHandler, createRequestRefundHandler } from "../supabase/functions/_shared/refund_http.ts";
 import { createSubmitOrderHandler } from "../supabase/functions/_shared/submit_order.ts";
 import { createWebhookHandler } from "../supabase/functions/_shared/webhook.ts";
 
@@ -19,6 +20,8 @@ const routes: Record<string, (req: Request) => Promise<Response>> = {
   "reconcile": createReconcileHandler(deps, {
     staleSubmittedSeconds: Number(Deno.env.get("RECONCILE_STALE_SUBMITTED_SECONDS") ?? "120"),
   }),
+  "request-refund": createRequestRefundHandler(deps.db),
+  "outbox-worker": createOutboxWorkerHandler(envOutboxWorker()),
 };
 
 const port = Number(Deno.env.get("FUNCTIONS_PORT") ?? "54321");

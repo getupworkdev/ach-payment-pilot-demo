@@ -47,6 +47,12 @@ export class MockProvider implements PaymentProvider {
     return p ? { ...p } : null;
   }
 
+  /** Synchronous read of the provider's view of a payment (for other mocks). */
+  peek(id: string): ProviderPayment | null {
+    const p = this.#payments.get(id);
+    return p ? { ...p } : null;
+  }
+
   async listPayments(): Promise<ProviderPayment[]> {
     return [...this.#payments.values()].map((p) => ({ ...p }));
   }

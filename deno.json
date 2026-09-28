@@ -11,7 +11,10 @@
     "@electric-sql/pglite": "npm:@electric-sql/pglite@^0.3.0"
   },
   "fmt": {
-    "lineWidth": 120
+    "lineWidth": 120,
+    "exclude": [
+      "README.md"
+    ]
   },
   "lint": {
     "rules": {

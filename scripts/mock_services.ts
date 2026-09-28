@@ -15,10 +15,16 @@
 //   POST /control/payments/:id/refund         -> refund.completed
 //   POST /control/events/:event_id/redeliver  -> sends the same event again
 //   POST /control/pos/fault                   {"fault":"timeout_after_commit"}
+//   POST /control/provider-api/outage         {"down":true} / {"down":false}
+//   POST /control/provider-api/fault          {"fault":"rate_limited"}
 //   GET  /control/state
+// Authenticated provider API (called by the outbox worker)
+//   POST /provider-api/oauth/token            client credentials per entity
+//   POST /provider-api/refunds                bearer token + x-entity-id + idempotency-key
 
 import { MockPos, type PosFault } from "../supabase/functions/_shared/mock_pos.ts";
 import { MockProvider } from "../supabase/functions/_shared/mock_provider.ts";
+import { type ApiFault, MockProviderApi } from "../supabase/functions/_shared/mock_provider_api.ts";
 import { PosTimeoutError } from "../supabase/functions/_shared/pos.ts";
 import type { ProviderEvent } from "../supabase/functions/_shared/provider.ts";
 import { sign, SIGNATURE_HEADER } from "../supabase/functions/_shared/signature.ts";
@@ -33,6 +39,25 @@ const hangMs = Number(Deno.env.get("MOCK_POS_HANG_MS") ?? "10000");
 const provider = new MockProvider();
 const pos = new MockPos();
 const sent = new Map<string, ProviderEvent>();
+
+// Same default as supabase/functions/.env.example.
+const entityClients = JSON.parse(
+  Deno.env.get("PROVIDER_ENTITY_CREDENTIALS") ??
+    '{"store-001":{"client_id":"client-store-001","client_secret":"secret-store-001"},' +
+      '"store-002":{"client_id":"client-store-002","client_secret":"secret-store-002"}}',
+) as Record<string, { client_id: string; client_secret: string }>;
+
+// Payments created through /provider/debits don't carry an entity in this
+// mock; they all belong to store-001.
+const providerApi = new MockProviderApi({
+  clients: Object.fromEntries(
+    Object.entries(entityClients).map(([id, c]) => [id, { clientId: c.client_id, clientSecret: c.client_secret }]),
+  ),
+  payments: (id) => {
+    const p = provider.peek(id);
+    return p ? { entityId: "store-001", amountCents: p.amount_cents, status: p.status } : null;
+  },
+});
 
 async function deliver(event: ProviderEvent) {
   sent.set(event.event_id, event);
@@ -74,6 +99,17 @@ async function handle(req: Request): Promise<Response> {
   if (req.method === "GET" && (m = path.match(/^\/provider\/payments\/([^/]+)$/))) {
     const p = await provider.getPayment(decodeURIComponent(m[1]));
     return p ? json(200, p) : json(404, { error: "not found" });
+  }
+
+  // --- authenticated provider API ---
+  if (path.startsWith("/provider-api/")) {
+    try {
+      return await providerApi.fetch(req);
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === "TimeoutError")) throw err;
+      await new Promise((r) => setTimeout(r, hangMs)); // caller's timeout fires first
+      return json(504, { error: "gateway timeout" });
+    }
   }
 
   // --- POS ---
@@ -121,6 +157,16 @@ async function handle(req: Request): Promise<Response> {
   if (req.method === "POST" && path === "/control/pos/fault") {
     const { fault } = await req.json();
     pos.injectFault(fault as PosFault);
+    return json(200, { queued: fault });
+  }
+  if (req.method === "POST" && path === "/control/provider-api/outage") {
+    const { down } = await req.json();
+    providerApi.setDown(Boolean(down));
+    return json(200, { down: Boolean(down) });
+  }
+  if (req.method === "POST" && path === "/control/provider-api/fault") {
+    const { fault } = await req.json();
+    providerApi.injectFault(fault as ApiFault);
     return json(200, { queued: fault });
   }
   if (req.method === "GET" && path === "/control/state") {
